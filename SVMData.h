@@ -3,16 +3,16 @@
 using namespace Eigen;
   
 extern void deviceInitKernelMatrix(int *trainninst, int *testninst, int *nfeat, double *traindata, double *testdata);
-extern void deviceInitTarget(int *h_target, int trainninst, int, int *, int *, int *, int *);
-extern void deviceInitInstList(struct Inst *, unsigned *, unsigned, int, int, int);
-extern void deviceInitMu(double, double);
+extern void deviceInitTarget(int *h_target, int trainninst, int, int *, int *, int *);
+extern void deviceInitInstList(struct Inst *, unsigned *, unsigned, int, int);
+extern void deviceInitMu(double, double[]);
 extern void deviceInitO(double *, int);
 extern void deviceInitTargetTerm(double *, int);
 extern void deviceInitUpdateTerm(int, int);
 extern void deviceInitTri(int);
 extern void deviceInitLabelTrain(struct Inst *, unsigned);
 extern void deviceInitLabelTest(struct Inst *, unsigned);
-extern void kernelTest(int, int, int, int, double *, double, double, double, int);
+extern void kernelTest(int, int, int, int[], double *, double, double, double[]);
 
 
 /* ------------------------- SVM dataset class -------------------------------*/

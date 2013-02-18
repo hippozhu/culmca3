@@ -9,7 +9,7 @@ __constant__ int nclass;
 __constant__ int k;
 __constant__ int nnegibor;
 __constant__ double mu;
-__constant__ double nu;
+__constant__ double nu[4];
 __constant__ int idx_o;
 
 __constant__ int *target;
@@ -24,6 +24,7 @@ __constant__ double *t_gradient;
 __constant__ short *label_train;
 __constant__ short *label_test;
 __constant__ struct Inst *grouped_inst;
+__constant__ struct Inst *type_inst[4];
 __constant__ unsigned typecount[4];
 __constant__ int *target_offset;
 __constant__ int nn[4];
@@ -78,9 +79,9 @@ __device__ void setElementInt(int *m, int i, int j, int stride, int val){
   m[i * stride + j] = val;
 }
 
-__device__ int getTarget(int i, int kk){
-  return target[i * k + kk];
-}
+//__device__ int getTarget(int i, int kk){
+//  return target[i * k + kk];
+//}
 
 __device__ int getTargetByOffset(int ino, int kk){
   return target[target_offset[ino] + kk];
@@ -155,11 +156,11 @@ __device__ void calcTargetDist(){
 	  i = m;
 	  j = getTargetByOffset(m, n);
 	  if(c%gridDim.x == bid){
-	  double val = calcDist(i, km_train, j, km_train);
-      if (tid == 0){
-	    dist_target[target_offset[m] + n] = val;
-        sub_fval[bid] += val;
-	  }
+	    double val = calcDist(i, km_train, j, km_train);
+        if (tid == 0){
+	      dist_target[target_offset[m] + n] = val;
+          sub_fval[bid] += val;
+	    }
 	  }
 	  ++ c;
 	}
@@ -180,15 +181,9 @@ __device__ void updateDist(double *dist, struct Inst * inst1, int height, struct
 
 __global__ void update2(){
   calcTargetDist();
-  updateDist(dist1, grouped_inst, typecount[0], grouped_inst + typecount[0], typecount[1]);
-}
-
-__global__ void zeroHinge(){
-  int tid = threadIdx.x;
-  int bid = blockIdx.x;
-  int size = gridDim.x * blockDim.x;
-  for (int m = blockDim.x * bid + tid; m < typecount[0] * typecount[1] * 2 * k; m += size)
-    hinge_val[m] = .0; 
+  updateDist(dist1, type_inst[TN], typecount[TN], type_inst[FN], typecount[FN]);
+  if (nclass == 4)
+    updateDist(dist2, type_inst[TP], typecount[TP], type_inst[FP], typecount[FP]);
 }
 
 __device__ double hinge(double s){
@@ -222,43 +217,18 @@ __global__ void update3_2(){
   if (bid == 0 && threadIdx.x == 0)
     f_val = .0;
   
-  for (int m = 0; m < typecount[TN] * typecount[TP]; ++ m){
-    for (int kk = 0; kk < nn[grouped_inst[m / typecount[TP]].label]; ++ kk){
-      i = grouped_inst[m / typecount[TP]].ino;
-	  l = grouped_inst[typecount[TN] + m % typecount[TP]].ino;
-	  //j = getTarget(i, kk);
+  for (int m = 0; m < typecount[TN] * typecount[FN]; ++ m){
+    i = type_inst[TN][m / typecount[FN]].ino;
+	l = type_inst[FN][m % typecount[FN]].ino;
+    for (int kk = 0; kk < nn[TN]; ++ kk){
 	  j = getTargetByOffset(i, kk);
-	  //vdist = 1 + getElement(dist_target, i, kk, k) - dist1[m];
-	  //double tmp = getTargetDist(i, kk);
-	  //vdist = 1 + getTargetDist(i, kk) - dist1[m];
 	  vdist = 1 + dist_target[target_offset[i] + kk] - dist1[m];
 	  if (vdist > 0 && blockIdx.x == 0 && threadIdx.x == 0)
 	    f_val += vdist;
       h = hinge(vdist);
 	  if (h > 0){
-	    if (label_train[i] == TP)
-		  h *= nu;
-	    if (i % gridDim.x == bid)
-		  updateTri(i, l, j, h);
-	    if (j % gridDim.x == bid)
-		  updateTri(j, j, i, h);
-	    if (l % gridDim.x == bid)
-		  updateTri(l, i, l, h);
-	  }
-	  
-	  
-      l = grouped_inst[m / typecount[TP]].ino;
-	  i = grouped_inst[typecount[TN] + m % typecount[TP]].ino;
-	  //j = getTarget(i, kk);
-	  j = getTargetByOffset(i, kk);
-	  //vdist = 1 + getElement(dist_target, i, kk, k) - dist1[m];
-	  vdist = 1 + dist_target[target_offset[i] + kk] - dist1[m];
-	  if (vdist > 0 && blockIdx.x == 0 && threadIdx.x == 0)
-	    f_val += vdist;
-      h = hinge(vdist);
-	  if (h > 0){
-	    if (label_train[i] == TP)
-		  h *= nu;
+	    //if (label_train[i] == TP)
+		h *= nu[label_train[i]];
 	    if (i % gridDim.x == bid)
 		  updateTri(i, l, j, h);
 	    if (j % gridDim.x == bid)
@@ -267,6 +237,72 @@ __global__ void update3_2(){
 		  updateTri(l, i, l, h);
 	  }
 	}
+	
+    l = type_inst[TN][m / typecount[FN]].ino;
+	i = type_inst[FN][m % typecount[FN]].ino;
+    for (int kk = 0; kk < nn[FN]; ++ kk){
+	  j = getTargetByOffset(i, kk);
+	  vdist = 1 + dist_target[target_offset[i] + kk] - dist1[m];
+	  if (vdist > 0 && blockIdx.x == 0 && threadIdx.x == 0)
+	    f_val += vdist;
+      h = hinge(vdist);
+	  if (h > 0){
+	    //if (label_train[i] == TP)
+		h *= nu[label_train[i]];
+	    if (i % gridDim.x == bid)
+		  updateTri(i, l, j, h);
+	    if (j % gridDim.x == bid)
+		  updateTri(j, j, i, h);
+	    if (l % gridDim.x == bid)
+		  updateTri(l, i, l, h);
+	  }
+	}
+  }
+  
+  if (nclass == 4){
+  
+  for (int m = 0; m < typecount[TP] * typecount[FP]; ++ m){
+    i = type_inst[TP][m / typecount[FP]].ino;
+	l = type_inst[FP][m % typecount[FP]].ino;
+    for (int kk = 0; kk < nn[TP]; ++ kk){
+	  j = getTargetByOffset(i, kk);
+	  vdist = 1 + dist_target[target_offset[i] + kk] - dist2[m];
+	  if (vdist > 0 && blockIdx.x == 0 && threadIdx.x == 0)
+	    f_val += vdist;
+      h = hinge(vdist);
+	  if (h > 0){
+	    //if (label_train[i] == TP)
+		h *= nu[label_train[i]];
+	    if (i % gridDim.x == bid)
+		  updateTri(i, l, j, h);
+	    if (j % gridDim.x == bid)
+		  updateTri(j, j, i, h);
+	    if (l % gridDim.x == bid)
+		  updateTri(l, i, l, h);
+	  }
+	}
+	
+    l = type_inst[TP][m / typecount[FP]].ino;
+	i = type_inst[FP][m % typecount[FP]].ino;
+    for (int kk = 0; kk < nn[FP]; ++ kk){
+	  j = getTargetByOffset(i, kk);
+	  vdist = 1 + dist_target[target_offset[i] + kk] - dist2[m];
+	  if (vdist > 0 && blockIdx.x == 0 && threadIdx.x == 0)
+	    f_val += vdist;
+      h = hinge(vdist);
+	  if (h > 0){
+	    //if (label_train[i] == TP)
+		h *= nu[label_train[i]];
+	    if (i % gridDim.x == bid)
+		  updateTri(i, l, j, h);
+	    if (j % gridDim.x == bid)
+		  updateTri(j, j, i, h);
+	    if (l % gridDim.x == bid)
+		  updateTri(l, i, l, h);
+	  }
+	}
+  }
+  
   }
 }
 
@@ -281,10 +317,8 @@ __global__ void updateUpdateTerm(double alpha){
   for (int m = blockIdx.x * blockDim.x + threadIdx.x; m < ntrain * ntrain; m += size){
     if (m/ntrain == m%ntrain)
       t_update[m] = 1 - 2 * alpha * (t_target[m] + mu * t_triplet[m]);
-      //t_update[m] = 1 - 2 * alpha * ((1-mu) * t_target[m] + mu * t_triplet[m]);
 	else
       t_update[m] = - 2 * alpha * (t_target[m] + mu * t_triplet[m]);
-      //t_update[m] = - 2 * alpha * ((1-mu) * t_target[m] + mu * t_triplet[m]);
   }
 }
 
@@ -304,29 +338,6 @@ __global__ void zeroO(){
     O[1 - idx_o][m] = .0; 
 }
 
-__global__ void updateO(){
-  int tid = threadIdx.x;
-  int bid_row = blockIdx.x;
-  int bid_col = blockIdx.y;
-  
-  __shared__ double o_element[BSIZE];
-  
-	if (bid_col * BSIZE + tid < ntrain){
-  for (int start = 0; start < ntrain; start += BSIZE){
-	int len = min(BSIZE, ntrain - start);
-    if(tid < len)
-      o_element[tid] = getElement(O[idx_o], bid_row, start + tid, ntrain);
-	__syncthreads();
-	
-    for (int i = 0; i < len; ++ i){
-	  double val = o_element[i] * getElement(t_update, i + start, bid_col * BSIZE + tid, ntrain);
-	  //__syncthreads();
-	  O[1 - idx_o][bid_row * ntrain + bid_col * BSIZE + tid] += val;
-	}
-  }
-	}
-}
-
 __global__ void updateO1(){
   int tid = threadIdx.x;
   int bid_row = blockIdx.x;
@@ -336,19 +347,12 @@ __global__ void updateO1(){
   if (tid < workingtid)
     O[1 - idx_o][bid_row * ntrain + bid_col * BSIZE + tid] = .0;
   
-  //__shared__ double o_element[BSIZE];
   
   for (int start = 0; start < ntrain; start += BSIZE){
-	int len = min(BSIZE, ntrain - start);
-    //if(tid < len)
-    //  o_element[tid] = getElement(O[idx_o], bid_row, start + tid, ntrain);
-	//__syncthreads();
-	
+	int len = min(BSIZE, ntrain - start);	
     for (int i = 0; i < len; ++ i){
 	if (tid < workingtid){
 	  double val = getElement(O[idx_o], bid_row, start + i, ntrain) * getElement(t_update, i + start, bid_col * BSIZE + tid, ntrain);
-	  //double val = o_element[i] * getElement(t_update, i + start, bid_col * BSIZE + tid, ntrain);
-	  //__syncthreads();
 	  O[1 - idx_o][bid_row * ntrain + bid_col * BSIZE + tid] += val;
 	}
 	}
@@ -363,7 +367,15 @@ __global__ void knnUpdateDist(){
   for(int m = bid; m < ntest * ntrain; m += size){
     int i = m / ntrain;
 	int j = m % ntrain;
-	double d = calcDist(i, km_test, j, km_train);
+	
+	double d = DBL_MAX;
+	if (nclass == 2)
+	  d = calcDist(i, km_test, j, km_train);
+	else{
+	  if (label_test[i] == label_train[j] || label_test[i] + label_train[j] == 3)
+	    d = calcDist(i, km_test, j, km_train);
+	}
+	
 	if (tid == 0){
 	  ino_knn[m] = j;
       dist_knn[m] = d;
@@ -386,7 +398,6 @@ __global__ void knnFindNeighbor(){
     start += ntrain % BSIZE;
   
   __syncthreads();
-  //int b = min(len, k);
   int b = min(len, nnegibor);
   for (int i = 0; i < b; ++ i)
     for (int j = start; j < start + len - i - 1; ++ j)
@@ -407,7 +418,6 @@ __global__ void knnFindNeighbor(){
   __shared__ int shortest[BSIZE];
   
   int p = start + len -1;
-  //for (int i = 0; i < k; ++ i){
   for (int i = 0; i < nnegibor; ++ i){
     if (b > 0){
       dist[tid] = getElement(dist_knn, bid, p, ntrain);
@@ -433,7 +443,6 @@ __global__ void knnFindNeighbor(){
 	
 	__syncthreads();
 	if(tid == 0)
-	  //setElementInt(neighbor_knn, bid, i, k, ino[0]);
 	  setElementInt(neighbor_knn, bid, i, nnegibor, ino[0]);
 	if(tid == shortest[0]){
 	  -- b;
@@ -472,16 +481,15 @@ __global__ void knnAcc(int neiborhood_size){
   for (int m = tid; m < ntest; m += stride){
     int nsametype = 0;
     for (int i = 0; i < neiborhood_size; ++ i)
-	  //nsametype += neighbor_knn[m * k + i];
 	  nsametype += neighbor_knn[m * nnegibor + i];
 	if (nsametype > neiborhood_size/2){
 	  matched[tid] += 1;
-	  if (label_test[m] == TP)
-	    atomicAdd(&hits[TP], 1);
+	  if (label_test[m] == FN || label_test[m] == FP)
+	    atomicAdd(&hits[label_test[m]], 1);
 	}
 	else{
-	  if (label_test[m] == TN)
-	    atomicSub(&hits[TN], 1);
+	  if (label_test[m] == TN || label_test[m] == TP)
+	    atomicSub(&hits[label_test[m]], 1);
 	}
   }
   
@@ -508,8 +516,12 @@ __global__ void knnUpdateDist_train(){
     int i = m / ntrain;
 	int j = m % ntrain;
 	double d = DBL_MAX;
-	if (i != j  && label_train[i] == label_train[j])
-	  d = calcDist(i, km_train, j, km_train);
+	if (i != j)
+	  if (nclass == 2)
+	    d = calcDist(i, km_train, j, km_train);
+	  else
+	    if (label_train[i] == label_train[j] || label_train[i] + label_train[j] == 3)
+	      d = calcDist(i, km_train, j, km_train);
 	if (tid == 0){
 	  ino_knn[m] = j;
       dist_knn[m] = d;
@@ -593,9 +605,10 @@ __global__ void updateTarget(){
   int tid = threadIdx.x;
   int bid = blockIdx.x;
   int size = gridDim.x * blockDim.x;
-  for (int m = blockDim.x * bid + tid; m < ntrain * max(nn[TN], nn[TP]); m += size){
-    int ino = m / max(nn[TN], nn[TP]);
-	int idx_neighbor = m % max(nn[TN], nn[TP]);
+  int max_nn = max(max(nn[0], nn[1]), max(nn[2], nn[3]));
+  for (int m = blockDim.x * bid + tid; m < ntrain * max_nn; m += size){
+    int ino = m / max_nn;
+	int idx_neighbor = m % max_nn;
     if (idx_neighbor < nn[label_train[ino]])
 	  setTargetByOffset(ino, idx_neighbor, getElementInt(neighbor_knn, ino, idx_neighbor, nnegibor));
   }
@@ -624,10 +637,11 @@ __global__ void updateTargetTerm(){
     for (int kk = 0; kk < nn[label_train[i]]; ++ kk){
 	  j = getTargetByOffset(i, kk);
 	  
-	    if (label_train[i] == TP)
-		  h = nu;
-		else
-		  h = 1.0;
+	    //if (label_train[i] == TP)
+		//  h = nu;
+		//else
+		  //h = 1.0;
+		h = nu[label_train[i]];
 	    if (i % gridDim.x == bid)
 		  updateTar(i, j, h);
 	    if (j % gridDim.x == bid)
@@ -638,12 +652,12 @@ __global__ void updateTargetTerm(){
 }
 
 __global__ void countTarget(){
-  __shared__ int stay[BSIZE*2];
+  __shared__ int stay[BSIZE*4];
   
   int tid = threadIdx.x;
 
-  stay[tid] = 0;
-  stay[tid + BSIZE] = 0;
+  for (int i = 0; i < 4; ++ i)
+    stay[tid + BSIZE * i] = 0;
   
   for(int m = tid; m < ntrain; m += BSIZE){
     int l = label_train[m];
@@ -657,30 +671,22 @@ __global__ void countTarget(){
 	}
   }
   
-  int stride1 = blockDim.x/2;
-  while (stride1 > 0){
-	__syncthreads();
-	if (tid < stride1)
-	  stay[tid] += stay[tid + stride1];
-	stride1 /= 2;
-  }
-  
-  stride1 = blockDim.x/2;
-  while (stride1 > 0){
-	__syncthreads();
-	if (tid < stride1)
-	  stay[BSIZE + tid] += stay[BSIZE + tid + stride1];
-	stride1 /= 2;
-  }
-  
-  __syncthreads();
-  if (tid == 0){
-    hits[0] = stay[0];
-	hits[1] = nn[TN]*typecount[TN];
-    hits[2] = stay[BSIZE];
-	hits[3] = nn[TP]*typecount[TP];
+  for (int i = 0; i < 4; ++ i){
+    int stride1 = blockDim.x/2;
+    while (stride1 > 0){
+	  __syncthreads();
+	  if (tid < stride1)
+	    stay[BSIZE * i + tid] += stay[BSIZE * i + tid + stride1];
+	  stride1 /= 2;
+    }
+    __syncthreads();
+    if (tid == 0)
+	  hits[i] = stay[BSIZE * i];
   }
 }
+
+unsigned *tcount;
+int *ncount;
 
 void deviceInitKernelMatrix(int *trainninst, int *testninst, int *nf, double *traindata, double *testdata){
 
@@ -717,7 +723,8 @@ void deviceInitKernelMatrix(int *trainninst, int *testninst, int *nf, double *tr
   cudaFree(d_test_data);
 }
 
-void deviceInitTarget(int *h_target, int trainninst, int targetsize, int *kk, int *nc, int *Nneighbor, int *offset){
+void deviceInitTarget(int *h_target, int trainninst, int targetsize, int *nc, int *Nneighbor, int *offset){
+  ncount = Nneighbor;
   int *d_target;
   cudaMalloc((void **)&d_target, sizeof(int) * targetsize);
   cudaMemcpy(d_target, h_target, sizeof(int) * targetsize, cudaMemcpyHostToDevice);
@@ -728,7 +735,7 @@ void deviceInitTarget(int *h_target, int trainninst, int targetsize, int *kk, in
   cudaMemcpy(d_target, offset, sizeof(int) * trainninst, cudaMemcpyHostToDevice);
   cudaMemcpyToSymbol(target_offset, &d_target, sizeof(int*), 0, cudaMemcpyHostToDevice);
   
-  cudaMemcpyToSymbol(k, kk, sizeof(int), 0, cudaMemcpyHostToDevice);
+  //cudaMemcpyToSymbol(k, kk, sizeof(int), 0, cudaMemcpyHostToDevice);
   cudaMemcpyToSymbol(nclass, nc, sizeof(int), 0, cudaMemcpyHostToDevice);
   cudaMemcpyToSymbol(nn, Nneighbor, sizeof(int) * 4, 0, cudaMemcpyHostToDevice);
 }
@@ -757,8 +764,9 @@ void deviceInitLabelTest(struct Inst *inst, unsigned ninst){
   delete[] label;
 }
 
-void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int nc, int kk, int targetsize){
+void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int nc, int targetsize){
 
+  tcount = count;
   cudaMemcpyToSymbol(typecount, count, sizeof(unsigned) * 4, 0, cudaMemcpyHostToDevice);
   
   struct Inst *gi[4];
@@ -767,15 +775,11 @@ void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int 
       gi[i] = (struct Inst *)malloc(sizeof(struct Inst) * count[i]);
   }
 
-  //int *index = new int[ninst];
   int p[4] = {0, 0, 0, 0};
   for(int i = 0; i < ninst; ++ i){
     int type = inst[i].label;
 	gi[type][p[type]].ino = inst[i].ino;
 	gi[type][p[type]].label = inst[i].label;
-	//index[i] = p[type];
-	//for(int j = 0; j < inst[i].label; ++ j)
-	  //index[i] += count[j];
 	++ p[type];
   }
   
@@ -785,6 +789,8 @@ void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int 
   for (int i = 0; i < 4; ++ i){
     if (count[i] > 0)
 	  cudaMemcpy(d_inst + start, gi[i], sizeof(struct Inst) * count[i], cudaMemcpyHostToDevice);
+    struct Inst *dd_inst = d_inst + start;
+    cudaMemcpyToSymbol(type_inst, &dd_inst, sizeof(struct Inst *), i * sizeof(struct Inst *), cudaMemcpyHostToDevice);
     start += count[i];
   }
   cudaMemcpyToSymbol(grouped_inst, &d_inst, sizeof(struct Inst *), 0, cudaMemcpyHostToDevice);
@@ -794,7 +800,7 @@ void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int 
       free(gi[i]);
   }
   
-  double *distanceTarget, *distanceMatrix1, *distanceMatrix2, *hinge_array;
+  double *distanceTarget, *distanceMatrix1, *distanceMatrix2;
   
   cudaMalloc((void **)&distanceTarget, sizeof(double) * targetsize);
   cudaMemcpyToSymbol(dist_target, &distanceTarget, sizeof(double *), 0, cudaMemcpyHostToDevice);
@@ -802,9 +808,6 @@ void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int 
   if (nc == 2){
     cudaMalloc((void **)&distanceMatrix1, sizeof(double) * count[0] * count[1]);
 	cudaMemcpyToSymbol(dist1, &distanceMatrix1, sizeof(double *), 0, cudaMemcpyHostToDevice);
-	
-    cudaMalloc((void **)&hinge_array, sizeof(double) * count[0] * count[1] * 2 * kk);
-	cudaMemcpyToSymbol(hinge_val, &hinge_array, sizeof(double *), 0, cudaMemcpyHostToDevice);
   }
   else{
     cudaMalloc((void **)&distanceMatrix1, sizeof(double) * count[0] * count[3]);
@@ -815,11 +818,11 @@ void deviceInitInstList(struct Inst *inst, unsigned *count, unsigned ninst, int 
   
 }
 
-void deviceInitMu(double m, double n){
+void deviceInitMu(double m, double n[]){
   double local_m = m;
   cudaMemcpyToSymbol(mu, &local_m, sizeof(double), 0, cudaMemcpyHostToDevice);
-  double local_n = n;
-  cudaMemcpyToSymbol(nu, &local_n, sizeof(double), 0, cudaMemcpyHostToDevice);
+  //double local_n = n;
+  cudaMemcpyToSymbol(nu, n, sizeof(double) * 4, 0, cudaMemcpyHostToDevice);
 }
 
 void deviceInitO(double *o, int size){
@@ -875,14 +878,32 @@ void deviceInitKnn(int n_train, int n_test, int kk){
   cudaMemcpyToSymbol(nnegibor, &kk, sizeof(int), 0, cudaMemcpyHostToDevice);
 }
 
-void kernelTest(int d, int n, int n_test, int kk, double *result, double mu, double alpha, double nu, int k1){
+int targetUpdateNeeded(double alpha, int h_hits[]){
+  double targetCoverage[4];
+  double minCoverage = 1.0;
+  for (int i = 0; i < 4; ++ i){
+    targetCoverage[i] = 1.0 * h_hits[i] / (tcount[i]*ncount[i]);
+	if (minCoverage > targetCoverage[i])
+	  minCoverage = targetCoverage[i];
+  }
+  int totalMissed = 0;
+  for (int i = 0; i < 4; ++ i)
+    totalMissed += tcount[i]*ncount[i] - h_hits[i];
+
+  if (alpha < 1e-8 && totalMissed > 0)
+  //if ((alpha < 1e-8 && totalMissed > 0) || minCoverage < 0.5)
+    return 1;
+  else
+    return 0;
+}
+
+void kernelTest(int d, int n, int n_test, int k[], double *result, double mu, double alpha, double nu[]){
+  char path[1024];
+  getcwd(path, 1024);
   double original_alpha = alpha;
   double dd[20];
   int h_hits[4];
-  int* tt1;
-  int* tt2;
   deviceInitKnn(n, n_test, 40);
-  //double f = DBL_MAX;
   double f_old = DBL_MAX;
   double min_iter = 0;
   double global_max_acc = .0;
@@ -890,8 +911,6 @@ void kernelTest(int d, int n, int n_test, int kk, double *result, double mu, dou
   
   bool targetUpdated = false;
   int idx = 1;
-  //zeroHinge<<<84, 256>>>();
-  //zeroT_triplet<<<84, 256>>>(); 
   unsigned iter = 0; 
   while(true){
   
@@ -901,46 +920,29 @@ void kernelTest(int d, int n, int n_test, int kk, double *result, double mu, dou
   cudaEventCreate(&stop_event);
   cudaEventRecord(start_event, 0);
   
-  cout << endl << "Iter = " << iter << ", K = "<< kk << ", K1 = "<< k1 << ", mu = " << mu << ", nu = " << nu << endl;  
+  cout << endl << "Iter = " << iter << ", mu = " << mu << ", k = " << k[0] << "," << k[1] << "," << k[2] << "," << k[3] << ", nu = "  << nu[0] << "," << nu[1] << "," << nu[2] << "," << nu[3] << endl;  
 
   idx = 1 - idx;
   cudaMemcpyToSymbol(idx_o, &idx, sizeof(int), 0, cudaMemcpyHostToDevice);
   
   
   // update target and target term periodically
-  //if ((alpha < 1e-5 || 1.0 * h_hits[0] / h_hits[1] < 0.8 || 1.0 * h_hits[2] / h_hits[3] < 0.8) && (h_hits[0] != h_hits[1] || h_hits[2] != h_hits[3])){
-  if (alpha < 1e-8 && (h_hits[0] != h_hits[1] || h_hits[2] != h_hits[3])){
-  //int *h_t;
-  //cudaMemcpyFromSymbol(&h_t, target, sizeof(int *), 0, cudaMemcpyDeviceToHost);
-  //tt1 = new int[3200]; tt2 = new int[3200];
-  //cudaMemcpy(tt1, h_t, sizeof(int) * 3177, cudaMemcpyDeviceToHost);
+  if (targetUpdateNeeded(alpha, h_hits)){
     knnUpdateDist_train<<<84, BSIZE>>>();
     knnFindNeighbor_train<<<n, BSIZE>>>();
     updateTarget<<<84, BSIZE>>>();
 	zeroTargetTerm<<<84, BSIZE>>>();
 	updateTargetTerm<<<84, BSIZE>>>();
 	alpha = original_alpha;
-  //cudaThreadSynchronize();
-  //cudaMemcpy(tt2, h_t, sizeof(int) * 3177, cudaMemcpyDeviceToHost);
-  /*
-  int diff = 0;
-  for (int i = 0; i < 3177; ++ i){
-    if (tt1[i] != tt2[i]){
-	  ++ diff;
-	  cout << i << " ";
-	}
-  }
-  
-  cout << endl << "target change rate " << 1.0 * diff / 3177 << " (" << diff << "/3177)" << endl;
-  */
+    targetUpdated = true;
   }
   
   // update distances to targets(i,j) and between opposing points(i,l)
   update2<<<84, 256>>>();
+  
   // update t_triplet by calculating vdist of every (i, j, l)
   zeroT_triplet<<<84, 256>>>();  
-  update3_2<<<84, 256>>>(); 
-  //update3_3<<<84, 256>>>();  
+  update3_2<<<84, 256>>>();
   
   // update object function value
   calcFval<<<84, 256>>>();
@@ -966,7 +968,7 @@ void kernelTest(int d, int n, int n_test, int kk, double *result, double mu, dou
       cudaMemcpyFromSymbol(h_hits, hits, sizeof(int) * 4, 0, cudaMemcpyDeviceToHost);
       cudaMemcpyFromSymbol(&dd[i], acc_knn, sizeof(double), 0, cudaMemcpyDeviceToHost);
       //cout << dd[i] << "(" << h_hits[0] << "," << h_hits[1] << "), ";
-      cout << h_hits[0] + h_hits[1] << "(" << h_hits[0] << "," << h_hits[1] << "), ";
+      cout << h_hits[0] + h_hits[1] + h_hits[2] + h_hits[3] << "(" << h_hits[0] << "," << h_hits[1] << "," << h_hits[2] << "," << h_hits[3] << "), ";
     }
   
     double max_acc = .0;
@@ -990,9 +992,11 @@ void kernelTest(int d, int n, int n_test, int kk, double *result, double mu, dou
     countTarget<<<1, BSIZE>>>();
     cudaThreadSynchronize();
     cudaMemcpyFromSymbol(h_hits, hits, sizeof(int) * 4, 0, cudaMemcpyDeviceToHost);
-    cout << endl << "Targets: " << 1.0 * h_hits[0]/h_hits[1] 
-    << "(" << h_hits[0] << "/" << h_hits[1] << "), " << 1.0 * h_hits[2]/h_hits[3] 
-    << "(" << h_hits[2] << "/" << h_hits[3] << ")";
+    cout << endl << "Targets: " 
+	<< 1.0 * h_hits[0]/(tcount[0]*ncount[0]) << "(" << h_hits[0] << "/" << tcount[0]*ncount[0] << "), " 
+	<< 1.0 * h_hits[1]/(tcount[1]*ncount[1]) << "(" << h_hits[1] << "/" << tcount[1]*ncount[1] << "), " 
+	<< 1.0 * h_hits[2]/(tcount[2]*ncount[2]) << "(" << h_hits[2] << "/" << tcount[2]*ncount[2] << "), " 
+	<< 1.0 * h_hits[3]/(tcount[3]*ncount[3]) << "(" << h_hits[3] << "/" << tcount[3]*ncount[3] << ")";
   }
   else{
 	cout << ", increased by " << dd[9] - f_old;
@@ -1019,7 +1023,7 @@ void kernelTest(int d, int n, int n_test, int kk, double *result, double mu, dou
   float time_kernel;
   cudaEventRecord(stop_event, 0);
   cudaEventElapsedTime(&time_kernel, start_event, stop_event);
-  cout << "time " << time_kernel/1000 << endl;
+  cout << "time " << time_kernel/1000 << " at " << path << endl;
   ++ iter;
   //if (iter > 100)
   if (alpha < 1e-10)

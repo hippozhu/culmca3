@@ -2,17 +2,17 @@
 #include "SVMData.h"
 #include "Neighborhood.h"
 
-Neighborhood::Neighborhood(SVMData& train, SVMData& test, int nc, int kk, int k1):sd(&train), sd_test(&test), nclass(nc), k(kk), nfeat(train.nfeat), ninst(train.ninst), ninst_test(test.ninst)
+Neighborhood::Neighborhood(SVMData& train, SVMData& test, int nc, int kk[]):sd(&train), sd_test(&test), nclass(nc), k(kk[0]), nfeat(train.nfeat), ninst(train.ninst), ninst_test(test.ninst)
 {
-  nn[0] = k;
-  nn[1] = k1;
-  nn[2] = 0;
-  nn[3] = 0;
+  nn[0] = kk[0];
+  nn[1] = kk[1];
+  nn[2] = kk[2];
+  nn[3] = kk[3];
   findTarget();
-  deviceInitTarget(target, train.ninst, target_size, &k, &nclass, nn, target_offset);
+  deviceInitTarget(target, train.ninst, target_size, &nclass, nn, target_offset);
   deviceInitLabelTrain(train.inst, train.ninst);
   deviceInitLabelTest(test.inst, test.ninst);
-  deviceInitInstList(train.inst, train.typecount, train.ninst, nclass, k, target_size);
+  deviceInitInstList(train.inst, train.typecount, train.ninst, nclass, target_size);
 }
 
 Neighborhood::~Neighborhood(){

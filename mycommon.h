@@ -13,6 +13,7 @@
 #include <limits>
 #include <cmath>
 #include <cstdlib>
+#include <unistd.h>
 
 #define TN 0
 #define TP 1

@@ -1,7 +1,7 @@
 
 class KernelNeighborhood : public Neighborhood{
   public:
-	KernelNeighborhood(SVMData&, SVMData&, int, int, int);
+	KernelNeighborhood(SVMData&, SVMData&, int, int[]);
 	
     MatrixXd K, K_test;
 	vector<VectorXd> E;

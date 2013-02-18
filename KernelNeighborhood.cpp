@@ -4,7 +4,7 @@
 #include "KernelNeighborhood.h"
 
 
-KernelNeighborhood::KernelNeighborhood(SVMData& train, SVMData& test, int nc, int kk, int k1):Neighborhood(train, test, nc, kk, k1), gamma(1.0/nfeat){
+KernelNeighborhood::KernelNeighborhood(SVMData& train, SVMData& test, int nc, int k[]):Neighborhood(train, test, nc, k), gamma(1.0/nfeat){
   generateKernelMatrix();
   generateTestKernelMatrix();
   initE();

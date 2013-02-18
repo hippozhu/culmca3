@@ -2,7 +2,7 @@
 /* ------------------------- Neighborhood class -------------------------------*/
 class Neighborhood{
   public:
-    Neighborhood(SVMData&, SVMData&, int, int, int);
+    Neighborhood(SVMData&, SVMData&, int, int[]);
 	~Neighborhood();
     SVMData *sd, *sd_test;
 	int nclass;

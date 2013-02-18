@@ -5,7 +5,8 @@
 #include "Solver.h"
 
 
-Solver::Solver(KernelNeighborhood &neighborhood, double m, double a, double n):nb(&neighborhood), alpha(a), mu(m), nu(n) {
+Solver::Solver(KernelNeighborhood &neighborhood, double m, double a, double n[]):nb(&neighborhood), alpha(a), mu(m) {
+  nu[0] = n[0];nu[1] = n[1];nu[2] = n[2];nu[3] = n[3];
   initO();
   deviceInitMu(mu, nu);
   double *o = new double[(*nb).nfeat * (*nb).ninst];
@@ -36,7 +37,7 @@ void Solver::computeTargetTerm(){
   for(int i = 0; i < (*nb).ninst; i++)
 	for(int j = 0; j < (*nb).nn[(*nb).sd->inst[i].label]; j++){
 	  if ((*nb).sd->inst[i].label == TP)
-	    s = nu;
+	    s = nu[0];
 	  else
 	    s = 1.0;
 	  int neighbor = (*nb).getTargetByOffset(i, j);

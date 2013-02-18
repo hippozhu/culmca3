@@ -2,7 +2,7 @@
 /* ------------------------- Solver class -------------------------------*/
 class Solver{
   public:
-    Solver(KernelNeighborhood &, double, double, double);
+    Solver(KernelNeighborhood &, double, double, double[]);
 	
 	KernelNeighborhood *nb;
     MatrixXd O;
@@ -11,7 +11,7 @@ class Solver{
 	MatrixXd G;
 	double alpha;  // step size
 	double mu;
-	double nu;
+	double nu[4];
 	double f_val;
 	void solve();
 	void cusolve();
